@@ -101,7 +101,7 @@ def cox_loss(cox_scores, times, status):
     cox_scores = cox_scores -torch.max(cox_scores)
     exp_scores = torch.exp(cox_scores)
     loss = cox_scores - torch.log(torch.cumsum(exp_scores, dim=0)+1e-5)
-    loss = - loss * statuss
+    loss = - loss * status
 
     if (loss != loss).any():
         import pdb;
