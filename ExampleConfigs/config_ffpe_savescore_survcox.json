@@ -23,8 +23,8 @@
     "flag": "ffpe_model_survcox",
     "max_patch_per_wsi_train": 100,
     "max_patch_per_wsi_val": 100,
-    "restore_path": "models/ffpe_model/model_dict_best.pt",
-    "model_path": "models/ffpe_model/model_dict_best.pt",
+    "restore_path": "models/ffpe_model_survcox/model_dict_best.pt",
+    "model_path": "models/ffpe_model_survcox/model_dict_best.pt",
     "output_path": "ffpe/output/savescore/",
     "checkpoint_path": "",
     "summary_path": "ffpe/output/"

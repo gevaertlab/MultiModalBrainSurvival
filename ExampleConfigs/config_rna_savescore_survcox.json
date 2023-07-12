@@ -1,0 +1,19 @@
+{
+    "task": "survival_prediction",
+    "num_classes": 1,
+    "batch_size": 128,
+    "use_cuda": true,
+    "train_csv_path": "/path/to/rna_train.csv",
+    "val_csv_path": "/path/to/rna_val.csv",
+    "test_csv_path": "/path/to/rna_test.csv",
+    "num_workers": 10,
+    "num_epochs": 10,
+    "lr_rna": 1e-05,
+    "lr_mlp": 1e-05,
+    "weight_decay": 1e-05,
+    "flag": "rna_model_survcox",
+    "restore_path": "models/rna_model_survcox/model_dict_best.pt",
+    "model_path": "models/rna_model_survcox/model_dict_best.pt",
+    "output_path": "rna/output/savescore/",
+    "checkpoint_path": ""
+}
