@@ -20,7 +20,7 @@
     "aggregator_hdim": 2048,
     "task": "survival_prediction",
     "n_layers_to_train": 2,
-    "flag": "ffpe_model_survcox",
+    "flag": "ffpe_model",
     "max_patch_per_wsi_train": 100,
     "max_patch_per_wsi_val": 100,
     "checkpoint_path": "ffpe/output/",
