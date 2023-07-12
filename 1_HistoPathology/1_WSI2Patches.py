@@ -35,6 +35,7 @@ import logging
 ###############
 
 def get_mask_image(img_RGB, RGB_min=50):
+    
     img_HSV = rgb2hsv(img_RGB)
 
     background_R = img_RGB[:, :, 0] > threshold_otsu(img_RGB[:, :, 0])
@@ -50,6 +51,7 @@ def get_mask_image(img_RGB, RGB_min=50):
     return mask
 
 def get_mask(slide, level='max', RGB_min=50):
+    
     #read svs image at a certain level  and compute the otsu mask
     if level == 'max':
         level = len(slide.level_dimensions) - 1
@@ -61,6 +63,7 @@ def get_mask(slide, level='max', RGB_min=50):
     return tissue_mask, level
 
 def extract_patches(slide_path, mask_path, patch_size, patches_output_dir, slide_id, max_patches_per_slide=2000):
+    
     patch_folder = os.path.join(patches_output_dir, slide_id)
     if not os.path.isdir(patch_folder):
         os.makedirs(patch_folder)
@@ -130,7 +133,7 @@ def extract_patches(slide_path, mask_path, patch_size, patches_output_dir, slide
         print(e)
 
 def get_slide_id(slide_name):
-    return slide_name.split('.')[0]+'.'+slide_name.split('.')[1]
+    return slide_name.split('.')[0]#+'.'+slide_name.split('.')[1]
 
 def process(opts):
     # global lock
@@ -144,6 +147,8 @@ def process(opts):
 parser = argparse.ArgumentParser(description='Generate patches from a given folder of images')
 parser.add_argument('--wsi_path', required=True, metavar='WSI_PATH', type=str,
                     help='Path to the input directory of WSI files')
+parser.add_argument('--svs_file', required=False, default=None, metavar='SVS_FILE', type=str,
+                    help='Path to the svs file')
 parser.add_argument('--patch_path', required=True, metavar='PATCH_PATH', type=str,
                     help='Path to the output directory of patch images')
 parser.add_argument('--mask_path', required=True, metavar='MASK_PATH', type=str,
@@ -160,8 +165,14 @@ parser.add_argument('--dezoom_factor', default=1.0, type=float,
 if __name__ == '__main__':
 
     args = parser.parse_args()
-    slide_list = os.listdir(args.wsi_path)
-    slide_list = [s for s in slide_list if s.endswith('.svs')]
+
+    slide_list = []
+    if args.svs_file is None:
+        slide_list = os.listdir(args.wsi_path)
+        slide_list = [s for s in slide_list if s.endswith('.svs')]
+    else:
+        slide_list.append(args.svs_file)
+    #slide_list = ['x067.svs']
 
     opts = [
         (os.path.join(args.wsi_path, s), (args.patch_size, args.patch_size), args.patch_path, args.mask_path,
