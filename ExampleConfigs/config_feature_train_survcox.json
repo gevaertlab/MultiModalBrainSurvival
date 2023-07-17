@@ -1,0 +1,18 @@
+{
+    "batch_size": 128,
+    "task": "survival_prediction",
+    "num_classes": 1,
+    "use_cuda": false,
+    "train_csv_path": "/path/to/feature_train.csv",
+    "val_csv_path": "/path/to/feature_val.csv",
+    "num_workers": 10,
+    "num_epochs": 80,
+    "lr": 1e-06,
+    "weight_decay": 1e-05,
+    "flag": "earlyfusion_model_survcox",
+    "checkpoint_path": "feature/output/",
+    "summary_path": "feature/output/summary/",
+    "model_path": "",
+    "restore_path": "",
+    "test_csv_path": "/path/to/feature_test.csv"
+}

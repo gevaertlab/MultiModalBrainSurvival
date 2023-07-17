@@ -1,0 +1,18 @@
+{
+    "batch_size": 32,
+    "task": "survival_bin",
+    "num_classes": 4,
+    "use_cuda": false,
+    "train_csv_path": "/path/to/feature_train.csv",
+    "val_csv_path": "/path/to/feature_val.csv",
+    "test_csv_path": "/path/to/feature_test.csv",
+    "num_workers": 10,
+    "num_epochs": 80,
+    "lr": 1e-05,
+    "weight_decay": 1e-05,
+    "flag": "earlyfusion_model_survbin",
+    "restore_path": "models/earlyfusion_model_survbin/model_dict_best.pt",
+    "model_path": "models/earlyfusion_model_survbin/model_dict_best.pt",
+    "output_path": "/feature/output/savescore/"
+    
+}
