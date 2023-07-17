@@ -7,7 +7,7 @@
 ###############################################################################
 ###############################################################################
 ### Example command
-### $ CUDA_VISIBLE_DEVICES=2,3 nohup 1_GeneExpress_train.py --config "/path/to/config_rna_train.json" &
+### $ python 1_GeneExpress_train.py --config "/path/to/config_rna_train.json"
 ###################################################
 ###################################################
 

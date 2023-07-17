@@ -7,7 +7,7 @@
 ###############################################################################
 ###############################################################################
 ### Example command
-### $ 3_GeneExpress_extractfeatures.py --config "/path/to/config_rna_extractfeatures.json"
+### $ python 3_GeneExpress_extractfeatures.py --config "/path/to/config_rna_extractfeatures.json"
 ###################################################
 ###################################################
 
@@ -95,6 +95,7 @@ def main():
         config = json.load(f)
 
     device = torch.device("cuda:0" if (torch.cuda.is_available() and config['use_cuda']) else "cpu")
+    num_classes = config['num_classes']
 
     model_rna = torch.nn.Sequential(
         nn.Dropout(), 
@@ -104,7 +105,7 @@ def main():
         nn.Linear(4096, 2048) 
     )
 
-    combine_mlp = torch.nn.Sequential(nn.Linear(2048, 1))
+    combine_mlp = torch.nn.Sequential(nn.Linear(2048, num_classes))
     model = RNAOnlyModel(model_rna, combine_mlp)
     
     if config['model_path'] != "":
@@ -115,25 +116,30 @@ def main():
     # Create training and validation datasets
     image_datasets = {}
     image_samplers = {}
+
+    if 'train_csv_path' in config:
+        image_datasets['train'] = RNADataset(config["train_csv_path"])
+        image_samplers['train'] = RandomSampler(image_datasets['train'])
     
-    image_datasets['train'] = RNADataset(config["train_csv_path"])
-    image_datasets['val'] = RNADataset(config["val_csv_path"])
-    image_datasets['test'] = RNADataset(config["test_csv_path"])
+    if 'val_csv_path' in config:
+        image_datasets['val'] = RNADataset(config["val_csv_path"])
+        image_samplers['val'] = RandomSampler(image_datasets['val'])
+
+    if 'test_csv_path' in config:    
+        image_datasets['test'] = RNADataset(config["test_csv_path"])
+        image_samplers['test'] = RandomSampler(image_datasets['test'])
 
     print("loaded datasets")
-    image_samplers['train'] = RandomSampler(image_datasets['train'])
-    image_samplers['val'] = RandomSampler(image_datasets['val'])
-    image_samplers['test'] = RandomSampler(image_datasets['test'])
 
     # Create training and validation dataloaders
     dataloaders_dict = {x: torch.utils.data.DataLoader(image_datasets[x], batch_size=config['batch_size'], sampler=image_samplers[x],num_workers=config["num_workers"])
-        for x in['train', 'val', 'test']}
+        for x in list(image_datasets.keys())}
 
     print("Initialized Datasets and Dataloaders...")
 
     # Send the model to GPU
     model = model.to(device)
-    for dataset in ["val", "train", "test"]:
+    for dataset in list(image_datasets.keys()):
         print("extracting features for dataset : {}".format(dataset))
         cases,features = extract_features(model,dataloaders_dict[dataset],device)
 

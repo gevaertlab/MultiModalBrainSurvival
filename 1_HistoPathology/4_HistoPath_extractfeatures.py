@@ -7,7 +7,7 @@
 ###############################################################################
 ###############################################################################
 ### Example command
-### $ 4_HistoPath_extractfeatures.py --config "/path/to/config_ffpe_extractfeatures.json"
+### $ python 4_HistoPath_extractfeatures.py --config "/path/to/config_ffpe_extractfeatures.json"
 ###################################################
 ###################################################
 
@@ -142,39 +142,41 @@ def main():
     image_samplers = {}
     print("loading datasets")
 
-
-    image_datasets['train'] = PatchBagDataset(patch_data_path=config["data_path"], csv_path=config["train_csv_path"],
+    if 'train_csv_path' in config:
+        image_datasets['train'] = PatchBagDataset(patch_data_path=config["data_path"], csv_path=config["train_csv_path"],
                                             img_size=config["img_size"], bag_size=config['val_bag_size'],
                                             transforms=data_transforms['val'],
                                             max_patches_total=config.get('max_patch_per_wsi_val', 1000))
-
-    image_datasets['val'] = PatchBagDataset(patch_data_path=config["data_path"], csv_path=config["val_csv_path"],
+        image_samplers['train'] = SequentialSampler(image_datasets['train'])
+    
+    if 'val_csv_path' in config:
+        image_datasets['val'] = PatchBagDataset(patch_data_path=config["data_path"], csv_path=config["val_csv_path"],
                                             img_size=config["img_size"], bag_size=config['val_bag_size'],
                                             transforms=data_transforms['val'],
                                             max_patches_total=config.get('max_patch_per_wsi_val', 1000))
+        image_samplers['val'] = SequentialSampler(image_datasets['val'])
 
-    image_datasets['test'] = PatchBagDataset(patch_data_path=config["data_path"], csv_path=config["test_csv_path"],
+    if 'test_csv_path' in config:    
+        image_datasets['test'] = PatchBagDataset(patch_data_path=config["data_path"], csv_path=config["test_csv_path"],
                                              img_size=config["img_size"], bag_size=config['val_bag_size'],
                                              transforms=data_transforms['val'],
                                              max_patches_total=config.get('max_patch_per_wsi_val', 1000))
+        image_samplers['test'] = SequentialSampler(image_datasets['test'])
 
     print("loaded datasets")
-    image_samplers['train'] = SequentialSampler(image_datasets['train'])
-    image_samplers['val'] = SequentialSampler(image_datasets['val'])
-    image_samplers['test'] = SequentialSampler(image_datasets['test'])
 
     # Create training and validation dataloaders
     dataloaders_dict = {
         x: torch.utils.data.DataLoader(image_datasets[x], batch_size=config['batch_size'], sampler=image_samplers[x],
                                        num_workers=config["num_workers"])
         for x in
-        ['train','val','test']}
+        list(image_datasets.keys())}
 
     print("Initialized Datasets and Dataloaders...")
 
     # Send the model to GPU
     model = model.to(device)
-    for dataset in ["train","val", "test"]:
+    for dataset in list(image_datasets.keys()):
         print("extracting features for dataset : {}".format(dataset))
         cases,features = extract_features(model,dataloaders_dict[dataset],device)
 

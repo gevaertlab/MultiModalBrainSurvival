@@ -22,7 +22,6 @@ class RNAOnlyModel(nn.Module):
         rna_features = self.rna_mlp(rna)
         return rna_features
     
-    
 def cox_loss(cox_scores, times, status):
     '''
 

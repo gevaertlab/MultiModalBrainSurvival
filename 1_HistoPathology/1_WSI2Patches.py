@@ -7,7 +7,7 @@
 ###################################################
 ###################################################
 ### Example command
-### $ 1_WSI2Patches.py --wsi_patch "/path/to/WSIfolder/" --patch_path "/path/to/output/patchfolder/" --mask_path "/path/to/output/maskfolder/" 
+### $ python 1_WSI2Patches.py --wsi_patch "/path/to/WSIfolder/" --patch_path "/path/to/output/patchfolder/" --mask_path "/path/to/output/maskfolder/" 
 ###                       --patch_size 224 --max_patches_per_slide 2000 --num_process 10 --dezoom_factor 1.0
 ###################################################
 ###################################################

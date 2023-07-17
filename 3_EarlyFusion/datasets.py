@@ -14,7 +14,6 @@ class featureDataset(Dataset):
 
     def __init__(self, csv_path):
 
-
         self._csv_path = csv_path
         self.data = None
         self._preprocess()
@@ -43,9 +42,9 @@ def get_data_feature(csv_path):
 
         row['vital_status'] = np.float32(row['vital_status'])
         row['survival_months'] = np.float32(row['survival_months'])
+        row['survival_bin'] = np.float32(row['survival_bin'])
 
         item = row.copy()
         dataset.append(item)
 
     return dataset
-

@@ -7,7 +7,7 @@
 ###############################################################################
 ###############################################################################
 ### Example command
-### $  CUDA_VISIBLE_DEVICES=2,3 nohup 2_HistoPath_train.py --config "/path/to/config_ffpe_train.json" &
+### $ CUDA_VISIBLE_DEVICES=2,3 nohup 2_HistoPath_train.py --config "/path/to/config_ffpe_train.json" &
 ###################################################
 ###################################################
 

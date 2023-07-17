@@ -5,12 +5,12 @@
 ### - input: 
 ###          - FFPE featues (from 4_HistoPath_extractfeatures.py)
 ###          - RNA features (from 3_GeneExpress_extractfeatures.py)
-###          - Patientinfo (columns: case, survival_months, vital_status (1 or 0))
+###          - Patientinfo (columns: case, survival_months, vital_status (1 or 0), survival bin)
 ### - output:  Concatenated FFPE and RNA features for Early Fusion model
 ###############################################################################
 ###############################################################################
 ### Example command
-### $ 1_Concat2Features.py
+### $ python 1_Concat2Features.py
 ###################################################
 ###################################################
 
@@ -36,9 +36,10 @@ print(pathology_cases.shape, pathology_features.shape)
 #needed: 
 # - patient id (= case_)
 # - survival_months
-# - vital_status (1 or 0)
+# - vital_status (1 or 0) (if task = survival prediction)
+# - survival bin (0 - 4) (if task = survival bin)
 patientinfo = pd.read_csv("patientinfo.csv", header=0)
-patientinfo = patientinfo[['case', 'survival_months', 'vital_status']]
+patientinfo = patientinfo[['case', 'survival_months', 'vital_status', 'survival_bin']]
 print(patientinfo.shape)
 
 ## Sanity check
@@ -60,5 +61,5 @@ final_df = patientinfo.merge(merged_df, how="inner", on='case')
 print(final_df.shape)
 
 ## Output
-final_df.columns = ['case', 'survival_months', 'vital_status'] + ['feature_'+str(col)  for col in list(final_df.columns)[4:]]
+final_df.columns = ['case', 'survival_months', 'vital_status', 'survival_bin'] + ['feature_'+str(col)  for col in list(final_df.columns)[4:]]
 final_df.to_csv('features.csv', index=False)

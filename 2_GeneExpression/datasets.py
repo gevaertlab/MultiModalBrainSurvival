@@ -14,7 +14,6 @@ class RNADataset(Dataset):
 
     def __init__(self, csv_path):
 
-
         self._csv_path = csv_path
         self.data = None
         self._preprocess()
@@ -50,4 +49,3 @@ def get_data_rna(csv_path):
         dataset.append(item)
 
     return dataset
-
