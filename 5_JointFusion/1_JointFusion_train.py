@@ -10,7 +10,7 @@
 ###############################################################################
 ###############################################################################
 ### Example command
-### $ 1_JointFusion_train.py --config "/path/to/config_joint_train.json"
+### $  CUDA_VISIBLE_DEVICES=2,3 python 1_JointFusion_train.py --config "/path/to/config_joint_train.json"
 ###################################################
 ###################################################
 
@@ -25,9 +25,10 @@ from torch.utils.data import WeightedRandomSampler, SequentialSampler, RandomSam
 import torchvision
 from torchvision import datasets, models, transforms
 from torchvision.utils import *
+from scipy.special import softmax as scipy_softmax
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
 from lifelines.utils import concordance_index
-from scipy.special import softmax as scipy_softmax
+from sksurv.metrics import concordance_index_censored
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -41,7 +42,7 @@ import argparse
 
 from datasets import PatchRNADataset, PatchBagRNADataset
 from resnet import resnet50
-from models import HistopathologyRNAModel, AggregationModel, AggregationProjectModel, Identity, TanhAttention, CoxLoss, BagHistopathologyRNAModel
+from models import HistopathologyRNAModel, AggregationModel, AggregationProjectModel, Identity, TanhAttention, CoxLoss, BagHistopathologyRNAModel, NLLSurvLoss
 
 from tensorboardX import SummaryWriter
 
@@ -53,7 +54,7 @@ print("Torchvision Version: ", torchvision.__version__)
 ### Functions
 ###############
 
-def evaluate(model, val_dataloader, criterion, summary_writer, device, epoch, mode='val', task='classification', target_label='label'):
+def evaluate(model, val_dataloader, criterion, summary_writer, device, epoch, num_classes, task='survival_bin', mode='val', target_label='label'):
     
     ## Validation
     model.eval()
@@ -64,22 +65,33 @@ def evaluate(model, val_dataloader, criterion, summary_writer, device, epoch, mo
     loss_list = []
     labels_list = []
     survival_months_list = []
+    survival_bin_list = []
     vital_status_list = []
 
     for b_idx, batch_dict in enumerate(val_dataloader):
+
         patches = batch_dict['patch_bag'].to(device)
         rna_data = batch_dict['rna_data'].to(device)
-        survival_months = batch_dict['survival_months'].to(device).float()
-        vital_status = batch_dict['vital_status'].to(device).float()
-        input_size = patches.size()
         wsis = batch_dict['wsi_file_name']
         labels = batch_dict[target_label].to(device).long()
 
+        survival_months = batch_dict['survival_months'].to(device).float()
+        survival_bin = batch_dict['survival_bin'].to(device).long()
+        vital_status = batch_dict['vital_status'].to(device).float()
+        input_size = patches.size()
+
         # forward
         with torch.no_grad():
+
             outputs = model(patches, rna_data)
+
             if task == 'classification':
                 loss = criterion(outputs, labels)
+
+            elif task == 'survival_bin':
+                censoring = 1 - vital_status
+                loss = criterion(h=outputs, y=survival_bin, c=censoring)
+
             else:
                 assert task == 'survival_prediction'
                 loss = criterion(outputs.view(-1), survival_months, vital_status)
@@ -88,6 +100,7 @@ def evaluate(model, val_dataloader, criterion, summary_writer, device, epoch, mo
         output_list.append(outputs.detach().cpu().numpy())
         labels_list.append(labels.detach().cpu().numpy())
         survival_months_list.append(survival_months.detach().cpu().numpy())
+        survival_bin_list.append(survival_bin.detach().cpu().numpy())
         vital_status_list.append(vital_status.detach().cpu().numpy())
         wsi_list.append(wsis)
         case_list.append(batch_dict['case'])
@@ -96,11 +109,13 @@ def evaluate(model, val_dataloader, criterion, summary_writer, device, epoch, mo
     case_list = [c for c_b in case_list for c in c_b]
     labels_list = np.array([l for l_b in labels_list for l in l_b])
     survival_months_list = np.array([s for s_b in survival_months_list for s in s_b])
+    survival_bin_list = np.array([b for s_b in survival_bin_list for b in s_b])
     vital_status_list = np.array([v for v_b in vital_status_list for v in v_b])
 
     output_list = np.concatenate(output_list, axis=0)
 
     if task == 'classification':
+
         if output_list.shape[1] == 2:
             patch_acc, patch_f1, patch_auc = accuracy_score(labels_list, output_list[:, 1] > .5), f1_score(labels_list,
                                                                                                            output_list[
@@ -118,8 +133,18 @@ def evaluate(model, val_dataloader, criterion, summary_writer, device, epoch, mo
                                                                                  case_auc))
 
     elif task == 'survival_prediction':
+
         wsi_CI, pandas_output = get_survival_CI(output_list, wsi_list, survival_months_list, vital_status_list)
         case_CI, _ = get_survival_CI(output_list, case_list, survival_months_list, vital_status_list)
+        
+        print("{} wsi  | epoch {} | CI {:.3f}".format(mode, epoch, wsi_CI))
+        print("{} case  | epoch {} | CI {:.3f}".format(mode, epoch, case_CI))
+
+    elif task == 'survival_bin':
+
+        wsi_CI, _ = get_nllsurv_CI(output_list, vital_status_list, survival_months_list, wsi_list, num_classes)
+        case_CI, pandas_output = get_nllsurv_CI(output_list, vital_status_list, survival_months_list, case_list, num_classes)
+
         print("{} wsi  | epoch {} | CI {:.3f}".format(mode, epoch, wsi_CI))
         print("{} case  | epoch {} | CI {:.3f}".format(mode, epoch, case_CI))
 
@@ -127,9 +152,8 @@ def evaluate(model, val_dataloader, criterion, summary_writer, device, epoch, mo
 
     return val_loss, pandas_output
 
-
-
 def get_survival_CI(output_list, ids_list, survival_months, vital_status):
+
     ids_unique = sorted(list(set(ids_list)))
     id_to_scores = {}
     id_to_survival_months = {}
@@ -154,9 +178,80 @@ def get_survival_CI(output_list, ids_list, survival_months, vital_status):
 
     return CI, pandas_output
 
+def get_nllsurv_CI(predictions, vital_status, survival_months, ids_list, num_classes):
+
+    # Process risk scores per wsi / case
+    ids_unique = sorted(list(set(ids_list)))
+    id_to_scores = {}
+    id_to_survival_months = {}
+    id_to_vital_status = {}
+
+    for i in range(len(predictions)):
+        id = ids_list[i]
+
+        if id not in id_to_scores:
+             id_to_scores[id] = {}
+             id_to_survival_months[id] = {}
+             id_to_vital_status[id] = {}
+
+        for j in range(0, num_classes):
+
+            if j not in id_to_scores[id]:
+                id_to_scores[id][j] = []
+            id_to_scores[id][j].append(predictions[i, j])
+            id_to_survival_months[id][j] = survival_months[i]
+            id_to_vital_status[id][j] = vital_status[i]
+
+    score_list = {}
+    survival_months_list = []
+    vital_status_list = []
+
+    #for k in id_to_scores.keys():
+    for k in ids_unique:
+
+        for j in range(0, num_classes):
+            
+            if 'score_{}'.format(j) not in score_list:
+                score_list['score_{}'.format(j)] = []
+
+            id_to_scores[k][j] = np.mean(id_to_scores[k][j])
+
+            score_list['score_{}'.format(j)].append(id_to_scores[k][j])
+
+            if j == 0:
+                survival_months_list.append(id_to_survival_months[k][j])
+                vital_status_list.append(id_to_vital_status[k][j])
+    
+    score_tensor = torch.empty((len(ids_unique),num_classes), dtype=torch.float32)
+
+    for i in range(len(ids_unique)):
+        k = ids_unique[i]
+        for j in range(0, num_classes):
+            #print(id_to_scores[k][j])
+            score_tensor[i][j] = torch.from_numpy(np.asarray(id_to_scores[k][j])).to(score_tensor)
+
+    survival_months_list = np.array(survival_months_list)
+    vital_status_list = np.array(vital_status_list)
+
+    # Predict CI
+    hazards = torch.sigmoid(score_tensor)
+    survival = torch.cumprod(1 - hazards, dim=-1)
+    risk_all = -torch.sum(survival, dim=-1).detach().cpu().numpy().flatten()
+
+    conc_index = concordance_index_censored(
+        vital_status_list.astype(bool), survival_months_list, risk_all, tied_tol=1e-08)[0]
+    
+    pandas_output = pd.DataFrame({'id': ids_unique, 'score': risk_all, 'survival_months': survival_months_list,
+                                  'vital_status': vital_status_list})
+    #for j in range(0, num_classes):
+    #    #print(score_list['score_{}'.format(j)])
+    #    pandas_output['score_{}'.format(j)] = np.array(score_list['score_{}'.format(j)])
+
+    return conc_index, pandas_output
 
 def train_model(model, dataloaders, criterion, optimizer, device, save_dir='checkpoints/models/',
-                num_epochs=25, summary_writer=None, log_interval=100, task='classification', output_dir=None,target_label='label'):
+                num_epochs=25, num_classes=4, summary_writer=None, log_interval=100, task='survival_bin', output_dir=None, target_label='label'):
+
     best_val_loss = np.inf
     summary_step = 0
     best_epoch = -1
@@ -184,20 +279,30 @@ def train_model(model, dataloaders, criterion, optimizer, device, save_dir='chec
 
         # Iterate over data.
         for b_idx, batch_dict in enumerate(dataloaders['train']):
+
             patches = batch_dict['patch_bag'].to(device)
             rna_data = batch_dict['rna_data'].to(device)
+
             survival_months = batch_dict['survival_months'].to(device).float()
+            survival_bin = batch_dict['survival_bin'].to(device).long()
             vital_status = batch_dict['vital_status'].to(device).float()
             input_size = patches.size()
 
             # zero the parameter gradients
             optimizer.zero_grad()
+
             # forward
             outputs = model(patches, rna_data)
+
             if task == 'classification':
+
                 loss = criterion(outputs, labels)
                 _, preds = torch.max(outputs, 1)
                 running_corrects += (preds == labels).sum().item()
+
+            elif task == 'survival_bin':
+                censoring = 1 - vital_status
+                loss = criterion(h=outputs, y=survival_bin, c=censoring)
 
             elif task == 'survival_prediction':
                 loss = criterion(outputs.view(-1), survival_months, vital_status)
@@ -236,41 +341,66 @@ def train_model(model, dataloaders, criterion, optimizer, device, save_dir='chec
         epoch_loss = running_loss / total_seen
         epoch_acc = running_corrects / total_seen
 
-        print('TRAIN Loss: {:.4f} Acc: {:.4f}'.format(epoch_loss, epoch_acc))
+        print('EPOCH Loss: {:.4f} Acc: {:.4f}'.format(epoch_loss, epoch_acc))
 
-        train_loss, _ = evaluate(model, dataloaders['train'], criterion, summary_writer, device, epoch,mode='train', task=task,target_label=target_label)
-        val_loss, _ = evaluate(model, dataloaders['val'], criterion, summary_writer, device, epoch, mode='val', task=task,target_label=target_label)
+        train_loss, _ = evaluate(model, dataloaders['train'], criterion, summary_writer, device, epoch, num_classes, task=task, mode='train', target_label=target_label)
+        print('TRAIN Loss: {:.4f}'.format(train_loss))
+        val_loss, _ = evaluate(model, dataloaders['val'], criterion, summary_writer, device, epoch, num_classes,  task=task, mode='val', target_label=target_label)
+        print('VAL Loss: {:.4f}'.format(val_loss))
         
         if val_loss < best_val_loss:
             best_epoch = epoch
             torch.save(model.state_dict(), os.path.join(save_dir, 'model_dict_best.pt'))
             best_val_loss = val_loss
                 
-
     torch.save(model.state_dict(), os.path.join(save_dir, 'model_last.pt'))
 
+    print("LAST MODEL, epoch = {}".format(epoch))
+    print("EVALUATING ON TRAIN SET")
+    test_loss, train_output_last = evaluate(model, dataloaders['train'], criterion, summary_writer, device, epoch,
+                                          num_classes, task=task,
+                                          mode='train', target_label=target_label)
+
     print("EVALUATING ON VAL SET")
-    val_loss, val_output_last = evaluate(model, dataloaders['val'], criterion, summary_writer, device, epoch, task=task,
+    test_loss, val_output_last = evaluate(model, dataloaders['val'], criterion, summary_writer, device, epoch, num_classes, task=task,
                                      mode='val', target_label=target_label)
+
+    print("EVALUATING ON TEST SET")
+    test_loss, test_output_last = evaluate(model, dataloaders['test'], criterion, summary_writer, device, epoch,
+                                           num_classes, task=task, mode='test', target_label=target_label)
 
     print("\n")
     print("LOADING BEST MODEL, best epoch = {}".format(best_epoch))
     model.load_state_dict(torch.load(os.path.join(save_dir, 'model_dict_best.pt')))
 
+    print("EVALUATING ON TRAIN SET")
+    test_loss, train_output_best = evaluate(model, dataloaders['train'], criterion, summary_writer, device, best_epoch,
+                                          num_classes, task=task,
+                                          mode='train', target_label=target_label)
+
     print("EVALUATING ON VAL SET")
     test_loss, val_output_best = evaluate(model, dataloaders['val'], criterion, summary_writer, device, best_epoch,
-                                          task=task,
+                                          num_classes, task=task,
                                           mode='val', target_label=target_label)
+    #test_loss = evaluate(model, dataloaders['val'], criterion, summary_writer, device, best_epoch, 
+    #                                      task=task,
+    #                                      mode='val', target_label=target_label)
 
-    print("EVALUATING ON TEST SET".format(best_epoch))
+    print("EVALUATING ON TEST SET")
     test_loss, test_output_best = evaluate(model, dataloaders['test'], criterion, summary_writer, device, best_epoch,
-                                           task=task, mode='test', target_label=target_label)
+                                          num_classes, task=task, mode='test', target_label=target_label)
+    #test_loss = evaluate(model, dataloaders['test'], criterion, summary_writer, device, best_epoch,
+    #                                       task=task, mode='test', target_label=target_label)
 
     if output_dir is not None:
         if not os.path.isdir(output_dir):
             os.makedirs(output_dir)
-        val_output_last.to_csv(os.path.join(output_dir, 'val_output_last.csv'), index=False)
 
+        train_output_last.to_csv(os.path.join(output_dir, 'train_output_last.csv'), index=False)
+        val_output_last.to_csv(os.path.join(output_dir, 'val_output_last.csv'), index=False)
+        test_output_last.to_csv(os.path.join(output_dir, 'test_output_last.csv'), index=False)
+
+        train_output_best.to_csv(os.path.join(output_dir, 'train_output_best.csv'), index=False)
         val_output_best.to_csv(os.path.join(output_dir, 'val_output_best.csv'), index=False)
         test_output_best.to_csv(os.path.join(output_dir, 'test_output_best.csv'), index=False)
 
@@ -320,7 +450,7 @@ def main():
     )
     combine_mlp = torch.nn.Sequential(
         nn.Dropout(0.8), 
-        nn.Linear(4096, 1)) #third model
+        nn.Linear(4096, num_classes)) #third model; 2x2048 features
 
     model = BagHistopathologyRNAModel(model_histo, model_rna, combine_mlp)
     if config['restore_path'] != "":
@@ -331,7 +461,7 @@ def main():
     
     print("Loaded model")
 
-    input_size = 224
+    input_size = config['img_size']
     # create Datasets and DataLoaders
     data_transforms = {
         'train': transforms.Compose([
@@ -358,11 +488,23 @@ def main():
         config['max_patch_per_wsi_train'] = 20
         config['max_patch_per_wsi_val'] = 20
 
-    image_datasets['train'] = PatchBagRNADataset(patch_data_path=config["data_path"], csv_path=config["train_csv_path"],img_size=config["img_size"],transforms=data_transforms['train'], bag_size=config['train_bag_size'],max_patch_per_wsi=config.get('max_patch_per_wsi_train', 1000))
+    image_datasets['train'] = PatchBagRNADataset(patch_data_path=config["data_path"], csv_path=config["train_csv_path"],
+                                                img_size=config["img_size"],
+                                                transforms=data_transforms['train'], 
+                                                bag_size=config['train_bag_size'],
+                                                max_patch_per_wsi=config.get('max_patch_per_wsi_train', 1000))
 
-    image_datasets['val'] = PatchBagRNADataset(patch_data_path=config["data_path"], csv_path=config["val_csv_path"],img_size=config["img_size"], bag_size=config['val_bag_size'], transforms=data_transforms['val'],max_patch_per_wsi=config.get('max_patch_per_wsi_val', 1000))
+    image_datasets['val'] = PatchBagRNADataset(patch_data_path=config["data_path"], csv_path=config["val_csv_path"],
+                                                img_size=config["img_size"], 
+                                                bag_size=config['val_bag_size'], 
+                                                transforms=data_transforms['val'],
+                                                max_patch_per_wsi=config.get('max_patch_per_wsi_val', 1000))
 
-    image_datasets['test'] = PatchBagRNADataset(patch_data_path=config["data_path"], csv_path=config["test_csv_path"],img_size=config["img_size"],bag_size=config['val_bag_size'], transforms=data_transforms['val'],max_patch_per_wsi=config.get('max_patch_per_wsi_val', 1000))
+    image_datasets['test'] = PatchBagRNADataset(patch_data_path=config["data_path"], csv_path=config["test_csv_path"],
+                                                img_size=config["img_size"],
+                                                bag_size=config['val_bag_size'], 
+                                                transforms=data_transforms['val'],
+                                                max_patch_per_wsi=config.get('max_patch_per_wsi_val', 1000))
 
     print("loaded datasets")
     image_samplers['train'] = RandomSampler(image_datasets['train'])
@@ -370,7 +512,14 @@ def main():
     image_samplers['test'] = SequentialSampler(image_datasets['test'])
 
     # Create training and validation dataloaders
-    dataloaders_dict = {x: torch.utils.data.DataLoader(image_datasets[x], batch_size=config['batch_size'], sampler=image_samplers[x],num_workers=config["num_workers"]) for x in ['train', 'val', 'test']}
+    dataloaders_dict = {
+        x: torch.utils.data.DataLoader(image_datasets[x], batch_size=config['batch_size'], sampler=image_samplers[x],
+                                       num_workers=config["num_workers"])
+        for x in
+        list(image_datasets.keys())
+        #['train', 'val', 'test']
+        #['test']
+    }
 
     print("Initialized Datasets and Dataloaders...")
 
@@ -418,6 +567,8 @@ def main():
     # Setup the loss fxn
     if config['task'] == 'survival_prediction':
         criterion = CoxLoss()
+    elif config['task'] == 'survival_bin':
+        criterion = NLLSurvLoss()
     else:
         criterion = nn.CrossEntropyLoss()
 
@@ -440,12 +591,13 @@ def main():
     train_model(model=model, dataloaders=dataloaders_dict, criterion=criterion,
                 optimizer=optimizer_ft,
                 device=device,
-                num_epochs=num_epochs, summary_writer=summary_writer,
+                num_epochs=num_epochs, 
+                num_classes=num_classes,
+                summary_writer=summary_writer,
                 save_dir=os.path.join(args.checkpoint_path, 'models', args.flag),
                 task=config.get('task', 'classification'),
                 output_dir=os.path.join(args.checkpoint_path, 'outputs', args.flag),
                 target_label=config.get('target_label', 'vital_status')
-                
                )
 
 ### Input arguments
@@ -456,7 +608,7 @@ parser.add_argument('--config', type=str, default='config.json', help='configura
 parser.add_argument("--save_images", type=int, default=0, help='save sample images from the dataset')
 parser.add_argument("--quick", type=int, default=0, help='use small datasets to check that the script runs')
 parser.add_argument("--log", type=int, default=0, help='0 = do not use a summary writer')
-parser.add_argument("--seed", type=int, default=1111, help="seed for the random number generator")
+parser.add_argument("--seed", type=int, default=4242, help="seed for the random number generator")
 
 ### MAIN
 ##########

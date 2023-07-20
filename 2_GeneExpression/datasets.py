@@ -44,6 +44,7 @@ def get_data_rna(csv_path):
 
         row['vital_status'] = np.float32(row['vital_status'])
         row['survival_months'] = np.float32(row['survival_months'])
+        row['survival_bin'] = np.long(row['survival_bin'])
 
         item = row.copy()
         dataset.append(item)

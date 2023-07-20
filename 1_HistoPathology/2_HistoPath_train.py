@@ -51,7 +51,7 @@ print("Torchvision Version: ", torchvision.__version__)
 ### Functions
 ###############
 
-def evaluate(model, val_dataloader, criterion, summary_writer, device, epoch, num_classes, mode='val', task='classification', target_label='label'):
+def evaluate(model, val_dataloader, criterion, summary_writer, device, epoch, num_classes, mode='val', task='survival_bin', target_label='label'):
     
     ## Validation
     model.eval()
@@ -112,6 +112,7 @@ def evaluate(model, val_dataloader, criterion, summary_writer, device, epoch, nu
     output_list = np.concatenate(output_list, axis=0)
 
     if task == 'classification':
+
         if output_list.shape[1] == 2:
             patch_acc, patch_f1, patch_auc = accuracy_score(labels_list, output_list[:, 1] > .5), f1_score(labels_list,
                                                                                                            output_list[
@@ -131,6 +132,7 @@ def evaluate(model, val_dataloader, criterion, summary_writer, device, epoch, nu
 
         wsi_CI, pandas_output = get_survival_CI(output_list, wsi_list, survival_months_list, vital_status_list)
         case_CI, _ = get_survival_CI(output_list, case_list, survival_months_list, vital_status_list)
+        
         print("{} wsi  | epoch {} | CI {:.3f}".format(mode, epoch, wsi_CI))
         print("{} case  | epoch {} | CI {:.3f}".format(mode, epoch, case_CI))
 
@@ -148,6 +150,7 @@ def evaluate(model, val_dataloader, criterion, summary_writer, device, epoch, nu
     #return val_loss
 
 def get_classification_scores(output_list, ids_list, labels_list):
+
     n_class = output_list.shape[1]
     ids_unique = sorted(list(set(ids_list)))
     id_to_scores = {}
@@ -280,7 +283,7 @@ def get_nllsurv_CI(predictions, vital_status, survival_months, ids_list, num_cla
     return conc_index, pandas_output
 
 def train_model(model, dataloaders, criterion, optimizer, device, save_dir='checkpoints/models/',
-                num_epochs=25, num_classes=4, summary_writer=None, log_interval=100, task='classification', output_dir=None, target_label='label'):
+                num_epochs=25, num_classes=4, summary_writer=None, log_interval=100, task='survival_bin', output_dir=None, target_label='label'):
     
     best_val_loss = np.inf
     summary_step = 0
@@ -601,7 +604,7 @@ parser.add_argument('--config', type=str, default='config.json', help='configura
 parser.add_argument("--save_images", type=int, default=0, help='save sample images from the dataset')
 parser.add_argument("--quick", type=int, default=0, help='use small datasets to check that the script runs')
 parser.add_argument("--log", type=int, default=0, help='0 = do not use a summary writer')
-parser.add_argument("--seed", type=int, default=1111, help="seed for the random number generator")
+parser.add_argument("--seed", type=int, default=4242, help="seed for the random number generator")
 
 ### MAIN
 ##########
